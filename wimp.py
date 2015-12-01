@@ -5,17 +5,38 @@ import os
 import sys
 import optparse
 
+def is_windows():
+    return os.getenv('OS') == 'Windows_NT'
+
+def is_supported_os():
+    if not is_windows():
+        return True
+    if os.getenv('USERPROFILE'):
+        return True
+    print 'Unsupported Windows version, should be Vista or higher'
+    sys.exit(1)
+    return False
+
+def default_path():
+    if is_windows():
+        return os.path.join(os.getenv('USERPROFILE'), 'wimp')
+    return os.path.join(os.getenv('HOME'), '.wimp')
+
 def cl_parse(argv):
-    description="WIMP (Where Is My Password) password manager. \
-Supports multiple tags, passwords history, AES encryption. \
-New passwords are read from stdin. \
-JSON is used for all options that take complex arguments. \
-PASSWORD is formatted as a single JSON object, TAGS is formatted as a JSON list of strings.\
+    description="\
+WIMP (Where Is My Password) password manager. Supports multiple tags, \
+passwords history, AES encryption. \ New passwords are read from stdin. JSON \
+is used for all options that take complex arguments. PASSWORD is formatted as \
+a single JSON object, TAGS is formatted as a JSON list of strings. Unless '--\
+path' is given, passwords are stored in $HOME/.wimp/ on Linux or in \
+$USERPROFILE/wimp on Windows. With '--path' multiple password storages can be \
+used. Each passwords storage is protected with a single master password. \
 "
     usage="python %prog [options]"
     epilog='''
 Example 1: Add new password
-    python wimp.py --add="{'title':'stackoverflow', 'username':'my_user_name', 'url'='http://stackoverflow.com/', 'tags':'fun'}"
+    python wimp.py --add="{'title':'stackoverflow', 'username':'my_user_name', \\
+        'url'='http://stackoverflow.com/', 'tags':'fun'}"
 
 Example 2: List all passwords tagged as 'fun' and/or 'work'
     python wimp.py --list_by_tags="['fun','work']"
@@ -24,7 +45,8 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
     # dont strip new-lines from multiline epilog but just print it as-is
     optparse.OptionParser.format_epilog = lambda self, formatter: self.epilog
 
-    parser = optparse.OptionParser(description=description, usage=usage, version="%prog 0.1", epilog=epilog)
+    parser = optparse.OptionParser(description=description, usage=usage,
+        version="%prog 0.1", epilog=epilog)
 
     group = optparse.OptionGroup(parser, "Basics", "")
     group.add_option("-a", "--add", dest="add_password", metavar="PASSWORD",
@@ -44,6 +66,9 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
         help="List tags")
     group.add_option("--echo", dest="echo_password", action="store_true",
         help="Echo when typing a new password. By default this option is 'off'.")
+
+    group.add_option("--path", dest="path", default=default_path(), metavar="PATH",
+        help="Echo when typing a new password. By default this option is 'off'.")
     parser.add_option_group(group)
 
     (options, left_over_args) = parser.parse_args(argv)
@@ -51,6 +76,7 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
     return (options, left_over_args)
 
 def main(argv):
+    is_supported_os() # exit if not
     (options, left_over_args) = cl_parse(argv)
 
     print options
