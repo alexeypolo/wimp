@@ -28,8 +28,7 @@ def is_supported_os():
 #
 def encrypt(password, data):
     encrypted_data = run_pipe(['echo -n ' + data, 'openssl enc -base64'])
-    # Drop the last character, it is a newline - not a part of the encrypted data
-    return encrypted_data[0:-1]
+    return encrypted_data[0:-1] # last character is newline - drop it
 
 def decrypt(password, encrypted_data):
     data = run_pipe(['echo ' + encrypted_data, 'openssl enc -base64 -d'])
@@ -38,8 +37,8 @@ def decrypt(password, encrypted_data):
 # For more insights:
 #   https://crackstation.net/hashing-security.htm
 def hash(password):
-    signature = run_pipe(['echo ' + password, 'openssl dgst -sha1'])
-    return signature
+    signature = run_pipe(['echo -n ' + password, 'openssl dgst -sha1'])
+    return signature[0:-1] # last character is newline - drop it
 
 def run_pipe(cmds):
     # Assemble a pipe line:
