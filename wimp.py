@@ -4,6 +4,8 @@
 import os
 import sys
 import optparse
+import shlex
+import subprocess
 
 def is_windows():
     return os.getenv('OS') == 'Windows_NT'
@@ -16,6 +18,49 @@ def is_supported_os():
     print 'Unsupported Windows version, should be Vista or higher'
     sys.exit(1)
     return False
+
+# A really appealing option for crypto library:
+# Stanford Javascript Crypto Library http://bitwiseshiftleft.github.io/sjcl/
+# BSD or GPLv2 license
+#
+# For now, we use openssl
+# http://how-to.linuxcareer.com/using-openssl-to-encrypt-messages-and-files
+#
+def encrypt(password, data):
+    encrypted_data = run_pipe(['echo -n ' + data, 'openssl enc -base64'])
+    # Drop the last character, it is a newline - not a part of the encrypted data
+    return encrypted_data[0:-1]
+
+def decrypt(password, encrypted_data):
+    data = run_pipe(['echo ' + encrypted_data, 'openssl enc -base64 -d'])
+    return data
+
+# For more insights:
+#   https://crackstation.net/hashing-security.htm
+def hash(password):
+    signature = run_pipe(['echo ' + password, 'openssl dgst -sha1'])
+    return signature
+
+def run_pipe(cmds):
+    # Assemble a pipe line:
+    # - First stage in pipe: don't override stdin
+    # - Mid/Last stages: wire ins and outs
+    #
+    # Last stage's stdout must be PIPE, otherwise communicate won't capture stdout
+    pipe = []
+    pipe.append(subprocess.Popen(shlex.split(cmds[0]), stdout=subprocess.PIPE))
+    for i in range(1, len(cmds)):
+        pipe.append(subprocess.Popen(shlex.split(cmds[i]), stdin=pipe[-1].stdout, stdout=subprocess.PIPE))
+
+    # Allow pipe[i] to receive a SIGPIPE if pipe[i+1] exits. Do not apply this to the last proc in pipe !!!
+    for p in pipe[0:-1]:
+        p.stdout.close()
+
+    (out, err) = pipe[-1].communicate()
+    if err:
+        print 'pipe error:', err
+        sys.exit(2)
+    return out
 
 def default_path():
     if is_windows():
@@ -66,7 +111,6 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
         help="List tags")
     group.add_option("--echo", dest="echo_password", action="store_true",
         help="Echo when typing a new password. By default this option is 'off'.")
-
     group.add_option("--path", dest="path", default=default_path(), metavar="PATH",
         help="Echo when typing a new password. By default this option is 'off'.")
     parser.add_option_group(group)
