@@ -7,6 +7,11 @@ import optparse
 import shlex
 import subprocess
 
+def print_and_exit(rc, message):
+    if len(message):
+        print message
+    sys.exit(rc)
+
 def is_windows():
     return os.getenv('OS') == 'Windows_NT'
 
@@ -15,8 +20,7 @@ def is_supported_os():
         return True
     if os.getenv('USERPROFILE'):
         return True
-    print 'Unsupported Windows version, should be Vista or higher'
-    sys.exit(1)
+    print_and_exit(1, 'Unsupported Windows version, should be Vista or higher')
     return False
 
 # A really appealing option for crypto library:
@@ -57,8 +61,7 @@ def run_pipe(cmds):
 
     (out, err) = pipe[-1].communicate()
     if err:
-        print 'pipe error:', err
-        sys.exit(2)
+        print_and_exit(2, 'pipe error: ' + str(err))
     return out
 
 def default_path():
@@ -76,7 +79,7 @@ path' is given, passwords are stored in $HOME/.wimp/ on Linux or in \
 $USERPROFILE/wimp on Windows. With '--path' multiple password storages can be \
 used. Each passwords storage is protected with a single master password. \
 "
-    usage="python %prog [options]"
+    usage="python %prog <--add|--update|--delete|--list_all> [options]"
     epilog='''
 Example 1: Add new password
     python wimp.py --add="{'title':'stackoverflow', 'username':'my_user_name', \\
@@ -93,11 +96,11 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
         version="%prog 0.1", epilog=epilog)
 
     group = optparse.OptionGroup(parser, "Basics", "")
-    group.add_option("-a", "--add", dest="add_password", metavar="PASSWORD",
+    group.add_option("-a", "--add", dest="add_entry", metavar="PASSWORD",
         help="Add new password.")
-    group.add_option("-u", "--update", dest="update_id", metavar="ID",
+    group.add_option("-u", "--update", dest="update_entry", metavar="ID",
         help="Update fields of existing entry")
-    group.add_option("-d", "--delete", dest="delete_id", metavar="ID",
+    group.add_option("-d", "--delete", dest="delete_entry_id", metavar="ID",
         help="Delete existing entry")
     group.add_option("-l", "--list", action="store_true", dest="list_all", metavar="[TAGS]",
         help="List all passwords")
@@ -111,18 +114,23 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
     group.add_option("--echo", dest="echo_password", action="store_true",
         help="Echo when typing a new password. By default this option is 'off'.")
     group.add_option("--path", dest="path", default=default_path(), metavar="PATH",
-        help="Echo when typing a new password. By default this option is 'off'.")
+        help="Path to passwords repository. If omitted, the default is " + default_path() + ".")
     parser.add_option_group(group)
 
-    (options, left_over_args) = parser.parse_args(argv)
+    (opt, left_over_args) = parser.parse_args(argv)
+    print opt
 
-    return (options, left_over_args)
+    # Check that exactly one option in this list is not None
+    # TODO: mutually exclusive options and subcommands are supported in argparse package. Consider using it.
+    mandatory_exclusives = [opt.add_entry, opt.update_entry, opt.delete_entry_id, opt.list_all]
+    if len(mandatory_exclusives) - mandatory_exclusives.count(None) != 1:
+        print_and_exit(3, usage)
+
+    return (opt, left_over_args)
 
 def main(argv):
     is_supported_os() # exit if not
-    (options, left_over_args) = cl_parse(argv)
-
-    print options
+    (opt, left_over_args) = cl_parse(argv)
 
     return 0
 
