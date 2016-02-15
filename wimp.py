@@ -2,10 +2,13 @@
 # Path to the interpreter is deliberately not mentioned.
 
 import os
+import errno
 import sys
 import optparse
 import shlex
 import subprocess
+import threading
+import getpass
 
 def print_and_exit(rc, message):
     if len(message):
@@ -30,19 +33,28 @@ def is_supported_os():
 # For now, we use openssl
 # http://how-to.linuxcareer.com/using-openssl-to-encrypt-messages-and-files
 #
-def encrypt(password, data):
-    encrypted_data = run_pipe(['echo -n ' + data, 'openssl enc -base64'])
-    return encrypted_data[0:-1] # last character is newline - drop it
+def encrypt(lines):
+    return run_proc(lines, 'openssl enc -des-ecb -pass env:WIMP_PASS')
 
-def decrypt(password, encrypted_data):
-    data = run_pipe(['echo ' + encrypted_data, 'openssl enc -base64 -d'])
-    return data
+def decrypt(encrypted_lines):
+    return run_proc(encrypted_lines, 'openssl enc -d -des-ecb -pass env:WIMP_PASS')
 
-# For more insights:
-#   https://crackstation.net/hashing-security.htm
-def hash(password):
-    signature = run_pipe(['echo -n ' + password, 'openssl dgst -sha1'])
-    return signature[0:-1] # last character is newline - drop it
+def hash_rsa(password):
+    hashed = run_proc(password, 'openssl dgst -sha1')
+    return hashed[0:-1] # drop 'newline' that is appended by openssl
+
+def pump_input(pipe, lines):
+    with pipe:
+        for line in lines:
+            pipe.write(line)
+
+def run_proc(input_string, command):
+    p = subprocess.Popen(command.split(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=1)
+    threading.Thread(target=pump_input, args=[p.stdin, input_string]).start()
+    with p.stdout:
+        output_string = p.stdout.read()
+    p.wait()
+    return output_string
 
 def run_pipe(cmds):
     # Assemble a pipe line:
@@ -96,13 +108,17 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
         version="%prog 0.1", epilog=epilog)
 
     group = optparse.OptionGroup(parser, "Basics", "")
-    group.add_option("-a", "--add", dest="add_entry", metavar="PASSWORD",
+    group.add_option("--start", action="store_true", dest="start",
+        help="Start session")
+    group.add_option("--end", action="store_true", dest="end",
+        help="End session")
+    group.add_option("--add", dest="add_entry", metavar="{id:value, password:value, tags:value, other:value, ...}",
         help="Add new password.")
-    group.add_option("-u", "--update", dest="update_entry", metavar="ID",
+    group.add_option("--update", dest="update_entry", metavar="{id:value, password:value, tags:value, other:value, ...}",
         help="Update fields of existing entry")
-    group.add_option("-d", "--delete", dest="delete_entry_id", metavar="ID",
+    group.add_option("--delete", dest="delete_entry_id", metavar="id",
         help="Delete existing entry")
-    group.add_option("-l", "--list", action="store_true", dest="list_all", metavar="[TAGS]",
+    group.add_option("--list", action="store_true", dest="list_all",
         help="List all passwords")
     parser.add_option_group(group)
 
@@ -122,15 +138,76 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
 
     # Check that exactly one option in this list is not None
     # TODO: mutually exclusive options and subcommands are supported in argparse package. Consider using it.
-    mandatory_exclusives = [opt.add_entry, opt.update_entry, opt.delete_entry_id, opt.list_all]
+    mandatory_exclusives = [opt.start, opt.end, opt.add_entry, opt.update_entry, opt.delete_entry_id, opt.list_all]
     if len(mandatory_exclusives) - mandatory_exclusives.count(None) != 1:
         print_and_exit(3, usage)
 
     return (opt, left_over_args)
 
+def make_sure_path_exists(path):
+    try:
+        os.makedirs(path)
+    except OSError as exception:
+        if exception.errno != errno.EEXIST:
+            raise
+
+def master_password_new(path, master_hash_file):
+    print 'Initializing wimp repo in', path
+    make_sure_path_exists(path)
+
+    password = getpass.getpass('New master password:')
+    if not password:
+        print_and_exit(5, "Empty string is not allowed")
+        return None
+
+    password2 = getpass.getpass('Confirm master password:')
+    if password != password2:
+        print_and_exit(5, "Passwords do not match")
+        return None
+
+    with open(master_hash_file, 'w') as f:
+        f.write(hash_rsa(password))
+
+    print 'OK'
+    return password
+
+def master_password_verify(master_hash_file):
+    # ask user for master password
+    password = getpass.getpass('Master password:')
+    with open(master_hash_file) as f:
+        fdata = f.read()
+
+    if fdata != hash_rsa(password):
+        print 'MISMATCH'
+        return None
+
+    print 'MATCH: OK'
+    return password
+
+def init_repo(path):
+    global db
+
+    master_hash_file = os.path.join(path, 'master.hash')
+    if os.path.exists(master_hash_file):
+        password = master_password_verify(master_hash_file)
+    else:
+        password = master_password_new(path, master_hash_file)
+
+    if not password:
+        return
+
+    os.putenv('WIMP_PASS', password)
+
+    with open(os.path.join(path, 'db.wimp')) as f:
+        db_raw = f.read()
+
+    db = json.loads(decrypt(db_raw))
+    return
+
 def main(argv):
     is_supported_os() # exit if not
     (opt, left_over_args) = cl_parse(argv)
+    init_repo(opt.path)
 
     return 0
 
