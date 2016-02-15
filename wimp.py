@@ -9,6 +9,8 @@ import shlex
 import subprocess
 import threading
 import getpass
+from datetime import datetime
+import json
 
 def print_and_exit(rc, message):
     if len(message):
@@ -144,6 +146,9 @@ Example 2: List all passwords tagged as 'fun' and/or 'work'
 
     return (opt, left_over_args)
 
+def get_timestamp():
+    return datetime.now().strftime("%y-%m-%d_%H:%M:%S")
+
 def make_sure_path_exists(path):
     try:
         os.makedirs(path)
@@ -178,31 +183,46 @@ def master_password_verify(master_hash_file):
         fdata = f.read()
 
     if fdata != hash_rsa(password):
-        print 'MISMATCH'
+        print_and_exit(5, 'MISMATCH')
         return None
 
     print 'MATCH: OK'
     return password
 
-def init_repo(path):
-    global db
+db_dict={}
+db_path=""
+def db_store():
+    db_dict['laststore'] = get_timestamp()
+    with open(db_path, 'w') as f:
+        f.write(encrypt(json.dumps(db_dict)))
 
+def db_load():
+    global db_dict
+    with open(db_path) as f:
+        db_dict = json.loads(decrypt(f.read()))
+    db_dict['lastload'] = get_timestamp()
+
+def init_repo(path):
+    global db_dict, db_path
+
+    # Create repo if none exists
+    # Create new or verify existing master password
     master_hash_file = os.path.join(path, 'master.hash')
     if os.path.exists(master_hash_file):
         password = master_password_verify(master_hash_file)
     else:
         password = master_password_new(path, master_hash_file)
 
-    if not password:
-        return
-
     os.putenv('WIMP_PASS', password)
 
-    with open(os.path.join(path, 'db.wimp')) as f:
-        db_raw = f.read()
-
-    db = json.loads(decrypt(db_raw))
-    return
+    # DB: load if exists, or create new + store
+    db_path = os.path.join(path, 'db.wimp')
+    if os.path.isfile(db_path):
+        db_load()
+    else:
+        db_dict['born'] = get_timestamp()
+        db_store()
+    return 0
 
 def main(argv):
     is_supported_os() # exit if not
